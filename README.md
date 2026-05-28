@@ -124,7 +124,7 @@ The SLURM launcher in [apply_server.sh](/nfs/roberts/project/pi_sjf37/lm2445/PV_
 - `infer_vllm_and_confusion.py` canonicalizes code and sub-code labels before computing confusion edges.
 - `pv_utils.py` includes evaluation helpers for code, sub-code, and relaxed span matching.
 
-## Citation
+<!-- ## Citation
 
 If you use this repository or the released models, please cite the PVminerLLM2 paper:
 
@@ -132,4 +132,4 @@ If you use this repository or the released models, please cite the PVminerLLM2 p
 @article{PVminerLLM2,
   title={PVminerLLM2: Improving Structured Extraction of Patient Voice via Preference Optimization}
 }
-```
+``` -->
