@@ -12,10 +12,10 @@ This repository contains the training and evaluation pipeline used to improve st
 
 Trained models are available on Hugging Face:
 
-- `lm2445/PVminerLLM2_1.5B`
-- `lm2445/PVminerLLM2_3B`
-- `lm2445/PVminerLLM2_8B`
-- `lm2445/PVminerLLM2_70B`
+- [PVminerLLM2_1.5B](https://huggingface.co/lm2445/PVminerLLM2_1.5B)
+- [PVminerLLM2_3B](https://huggingface.co/lm2445/PVminerLLM2_3B)
+- [PVminerLLM2_8B](https://huggingface.co/lm2445/PVminerLLM2_8B)
+- [PVminerLLM2_70B](https://huggingface.co/lm2445/PVminerLLM2_70B)
 
 ## Repository Structure
 
