@@ -19,13 +19,13 @@ Trained models are available on Hugging Face:
 
 ## Repository Structure
 
-- [infer_vllm_and_confusion.py](/nfs/roberts/project/pi_sjf37/lm2445/PV_multiagent/PVminerLLM2/infer_vllm_and_confusion.py): runs vLLM inference on a Hugging Face dataset saved with `load_from_disk`, parses structured outputs, and writes code/sub-code confusion CSVs.
-- [prepare_preference_data.py](/nfs/roberts/project/pi_sjf37/lm2445/PV_multiagent/PVminerLLM2/prepare_preference_data.py): builds targeted preference pairs using observed confusion patterns.
-- [train_preference.py](/nfs/roberts/project/pi_sjf37/lm2445/PV_multiagent/PVminerLLM2/train_preference.py): trains a token-weighted preference objective with LoRA adapters.
-- [merge_lora.py](/nfs/roberts/project/pi_sjf37/lm2445/PV_multiagent/PVminerLLM2/merge_lora.py): merges a trained LoRA adapter into the base model.
-- [pv_utils.py](/nfs/roberts/project/pi_sjf37/lm2445/PV_multiagent/PVminerLLM2/pv_utils.py): utilities for parsing structured outputs and computing code, sub-code, and span metrics.
-- [pipeline_from_confusion_to_eval_all.sh](/nfs/roberts/project/pi_sjf37/lm2445/PV_multiagent/PVminerLLM2/pipeline_from_confusion_to_eval_all.sh): end-to-end pipeline across the local SFT models in this repository.
-- [apply_server.sh](/nfs/roberts/project/pi_sjf37/lm2445/PV_multiagent/PVminerLLM2/apply_server.sh): example SLURM submission script for running the pipeline on GPU nodes.
+- [infer_vllm_and_confusion.py](infer_vllm_and_confusion.py): runs vLLM inference on a Hugging Face dataset saved with `load_from_disk`, parses structured outputs, and writes code/sub-code confusion CSVs.
+- [prepare_preference_data.py](prepare_preference_data.py): builds targeted preference pairs using observed confusion patterns.
+- [train_preference.py](train_preference.py): trains a token-weighted preference objective with LoRA adapters.
+- [merge_lora.py](merge_lora.py): merges a trained LoRA adapter into the base model.
+- [pv_utils.py](pv_utils.py): utilities for parsing structured outputs and computing code, sub-code, and span metrics.
+- [pipeline_from_confusion_to_eval_all.sh](pipeline_from_confusion_to_eval_all.sh): end-to-end pipeline across the local SFT models in this repository.
+- [apply_server.sh](apply_server.sh): example SLURM submission script for running the pipeline on GPU nodes.
 
 ## Expected Data Format
 
@@ -50,16 +50,52 @@ The structured output format is JSON-like and centers on a `results` list with e
 }
 ```
 
+## Requirements
+
+### Operating system and hardware
+
+The training and inference pipeline targets **Linux with one or more NVIDIA
+GPUs**. vLLM and bitsandbytes do not support macOS or CPU-only execution, so the
+pipeline scripts will not run on a Mac. The reported runs used 2 x NVIDIA B200
+with CUDA 12.8; smaller models can be run on a single GPU by setting `TP=1`.
+
+### Software environments
+
+Two environments are required, because the Qwen3.5 family needs a newer stack
+than the original four models:
+
+| Package | Llama-3.x / Qwen2.5 models | Qwen3.5-9B / Qwen3.8-27B |
+| --- | --- | --- |
+| Python | 3.11 | 3.11 |
+| torch | 2.9.0 | 2.13.0 (cu130) |
+| transformers | 4.57.6 | 5.17.0 |
+| vLLM | 0.11.2 | 0.30.0 |
+| peft | 0.18.1 | 0.18.1 |
+| lm-eval | 0.4.11 | 0.4.11 |
+
+The `qwen3_5` architecture is absent from transformers 4.57.6 and vLLM 0.11.2
+and present in transformers 5.17.0 and vLLM 0.30.0, so the newer environment is
+mandatory for those two models. The older environment is retained for the
+original four models so their published numbers stay reproducible; note that
+transformers 5 renames `torch_dtype` to `dtype`, which `pv_model_compat.py`
+handles for both versions.
+
 ## Environment
 
-An example Conda environment is provided in [environment.yml](/nfs/roberts/project/pi_sjf37/lm2445/PV_multiagent/PVminerLLM2/environment.yml).
+Each stack in the table above has its own Conda file (Linux + NVIDIA GPU only):
 
 ```bash
+# Llama-3.x / Qwen2.5 models
 conda env create -f environment.yml
-conda activate finben_vllm3
+conda activate pvminer
+
+# Qwen3.5-9B / Qwen3.8-27B
+conda env create -f environment_qwen35.yml
+conda activate pvminer_qwen35
 ```
 
-Core dependencies used by the pipeline include `transformers`, `datasets`, `peft`, `torch`, `vllm`, `scikit-learn`, and `lm-eval`.
+The SLURM launchers pick the environment through `CONDA_ENV`, for example
+`CONDA_ENV=pvminer_qwen35 sbatch apply_server.sh`.
 
 ## Minimal Workflow
 
@@ -116,7 +152,7 @@ For batch execution over the local models included in this repository, use:
 bash pipeline_from_confusion_to_eval_all.sh
 ```
 
-The SLURM launcher in [apply_server.sh](/nfs/roberts/project/pi_sjf37/lm2445/PV_multiagent/PVminerLLM2/apply_server.sh) shows one way to run this pipeline on a multi-GPU cluster environment.
+The SLURM launcher in [apply_server.sh](apply_server.sh) shows one way to run this pipeline on a multi-GPU cluster environment.
 
 ## Notes
 
@@ -133,3 +169,23 @@ If you use this repository or the released models, please cite the PVminerLLM2 p
   title={PVminerLLM2: Improving Structured Extraction of Patient Voice via Preference Optimization}
 }
 ``` -->
+
+## License
+
+The code in this repository is released under the MIT License; see the LICENSE
+file for the full text.
+
+The released model weights are covered by the license of their respective base
+models:
+
+- PVminerLLM2_1.5B is derived from Qwen2.5-1.5B-Instruct and is released under the
+  Apache 2.0 License.
+- PVminerLLM2_3B, PVminerLLM2_8B and PVminerLLM2_70B are derived from
+  Llama-3.2-3B-Instruct, Llama-3.1-8B-Instruct and Llama-3.3-70B-Instruct
+  respectively, and are subject to the Llama Community License. Built with Llama.
+
+Preference-optimized models derived from Qwen3.5-9B and Qwen3.8-27B are in
+preparation. Both base models are released under the Apache 2.0 License, and
+the derived weights will be released under the same terms.
+
+The PV-Miner data are not distributed with this repository.

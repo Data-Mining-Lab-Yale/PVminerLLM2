@@ -7,13 +7,19 @@ set -euo pipefail
 REPO_ROOT="$(readlink -f "$(dirname "$0")")"
 PIPELINE_OUT_ROOT="${PIPELINE_OUT_ROOT:-$(readlink -f "${REPO_ROOT}/preference_pipeline_outputs")}"
 
+# Weights and intermediates can live on scratch (PIPELINE_OUT_ROOT), while the
+# small eval artifacts stay on the project disk. Point both at the same place
+# to restore the old single-tree layout.
+RESULTS_ROOT="${RESULTS_ROOT:-$(readlink -f "${REPO_ROOT}/results")}"
+
 # Default to the local HF dataset discovered in the sibling benchmark tree.
 DATA_DIR="${DATA_DIR:-$(readlink -f "${REPO_ROOT}/../benckmark/PV_benckmark/split_out/non_test/training")}"
 
-# Only needed for the final lm_eval step.
-FINBEN_TASKS_PATH="${FINBEN_TASKS_PATH:-/home/lm2445/project_pi_sjf37/lm2445/finben/FinBen/tasks/pv_miner}"
 
-EPOCHS=3   # must match SFT
+# Label only: this never reaches a trainer. SFT runs 10 epochs
+# (sft_epoch10_raw2shot_to_finben_b200.sh) and preference training runs 3
+# (train_preference.py Config.num_train_epochs).
+SFT_EPOCHS="${SFT_EPOCHS:-10}"
 
 # One knob to rule them all
 TP="${TP:-2}"
@@ -32,14 +38,35 @@ PRINT_SAMPLES=3
 # =========================
 # LOCAL SFT MODELS
 # =========================
+# Override with a space-separated list of SFT model dirs, e.g.
+# MODELS="${SFT_RESULTS_ROOT}/PVminerLLM_qwen3.5_9b". The dir basename is the tag.
+if [[ -n "${MODELS:-}" ]]; then
+  read -r -a MODELS <<< "${MODELS}"
+else
 MODELS=(
   "${REPO_ROOT}/PVminerLLM_70b_llama3.3_instruct"
   "${REPO_ROOT}/PVminerLLM_8b_llama3.1_instruct"
   "${REPO_ROOT}/PVminerLLM_3b_llama3.2_instruct"
   "${REPO_ROOT}/PVminerLLM_qwen2.5_1.5b_instruct"
+  # Qwen3.5 family: hybrid-reasoning, VLM-wrapped decoders with 3:1
+  # linear:full attention. They need chat prompts and the full LoRA target
+  # set -- see is_qwen35 below.
+  "${SFT_RESULTS_ROOT:-${REPO_ROOT}}/PVminerLLM_qwen3.5_9b"
+  "${SFT_RESULTS_ROOT:-${REPO_ROOT}}/PVminerLLM_qwen3.8_27b"
 )
+fi
 
-mkdir -p "${PIPELINE_OUT_ROOT}"
+# Models whose linear-attention layers expose in_proj_*/out_proj instead of
+# q_proj/k_proj/v_proj/o_proj, and whose chat template opens a <think> block
+# unless thinking is explicitly disabled.
+is_qwen35 () {
+  case "$1" in
+    *qwen3.5*|*qwen3.8*|*Qwen3.5*|*Qwen3.8*|*qwen3_5*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+mkdir -p "${PIPELINE_OUT_ROOT}" "${RESULTS_ROOT}"
 
 if [[ ! -d "${DATA_DIR}" ]]; then
   echo "ERROR: DATA_DIR does not exist:"
@@ -69,19 +96,18 @@ for MODEL in "${MODELS[@]}"; do
   # --------------------------------------------------
   # Output folders (one per SFT model)
   # --------------------------------------------------
-  OUT_TAG="${MODEL_TAG}_epoch${EPOCHS}_localSft"
+  OUT_TAG="${MODEL_TAG}_sft${SFT_EPOCHS}ep_po3ep"
   OUT_ROOT="${PIPELINE_OUT_ROOT}/${OUT_TAG}"
 
   CONF_DIR="${OUT_ROOT}/confusion"
   PRED_DIR="${OUT_ROOT}/pred"
   PREFERENCE_DATA_DIR="${OUT_ROOT}/preference_data"
   PREFERENCE_RUNS_DIR="${OUT_ROOT}/preference_runs"
-  EVAL_DIR="${OUT_ROOT}/lm_eval_results"
-  FINBEN_OUT="${EVAL_DIR}/PvExtraction_full"
+  EVAL_DIR="${RESULTS_ROOT}/${OUT_TAG}/eval_results"
 
-  mkdir -p "${CONF_DIR}" "${PRED_DIR}" "${PREFERENCE_DATA_DIR}" "${PREFERENCE_RUNS_DIR}" "${EVAL_DIR}" "${FINBEN_OUT}"
+  mkdir -p "${CONF_DIR}" "${PRED_DIR}" "${PREFERENCE_DATA_DIR}" "${PREFERENCE_RUNS_DIR}" "${EVAL_DIR}"
 
-  FINBEN_OUT="$(readlink -f "${FINBEN_OUT}")"
+  EVAL_DIR="$(readlink -f "${EVAL_DIR}")"
 
   CODE_CONF_CSV="${CONF_DIR}/code_confusion_summary.csv"
   SUBCODE_CONF_CSV="${CONF_DIR}/subcode_confusion_summary.csv"
@@ -90,6 +116,17 @@ for MODEL in "${MODELS[@]}"; do
   RUN_NAME="preference_${OUT_TAG}"
   TRAIN_OUTPUT_DIR="${PREFERENCE_RUNS_DIR}/${RUN_NAME}"
   MERGED_DIR="${PREFERENCE_RUNS_DIR}/${RUN_NAME}-merged"
+
+  # --------------------------------------------------
+  # Per-model prompt / LoRA handling
+  # --------------------------------------------------
+  if is_qwen35 "${MODEL_TAG}"; then
+    INFER_EXTRA=(--prompt_mode chat)
+    TRAIN_EXTRA=(--lora_target_modules auto)
+  else
+    INFER_EXTRA=()
+    TRAIN_EXTRA=()
+  fi
 
   echo "============================================================"
   echo "MODEL      : ${MODEL_TAG}"
@@ -110,7 +147,8 @@ for MODEL in "${MODELS[@]}"; do
     --tp "${TP}" \
     --max_tokens "${MAX_TOKENS}" \
     --temperature "${TEMPERATURE}" \
-    --out_pred_jsonl "${PRED_JSONL}"
+    --out_pred_jsonl "${PRED_JSONL}" \
+    "${INFER_EXTRA[@]}"
 
   # =========================
   # 2) Prepare preference data
@@ -132,7 +170,8 @@ for MODEL in "${MODELS[@]}"; do
     --train_data_path "${PREFERENCE_DATA_DIR}" \
     --valid_data_path "${PREFERENCE_DATA_DIR}" \
     --output_dir "${TRAIN_OUTPUT_DIR}" \
-    --num_gpus "${NUM_GPUS}"
+    --num_gpus "${NUM_GPUS}" \
+    "${TRAIN_EXTRA[@]}"
 
   # =========================
   # 4) Merge trained adapter
@@ -144,22 +183,14 @@ for MODEL in "${MODELS[@]}"; do
     --dtype bf16
 
   # =========================
-  # 5) Eval (lm_eval + vLLM)
+  # 5) Eval (0-shot, chat template, greedy; thinking off)
   # =========================
-  if [[ -d "${FINBEN_TASKS_PATH}" ]]; then
-    lm_eval --model vllm \
-      --model_args "pretrained=${MERGED_DIR},tensor_parallel_size=${TENSOR_PARALLEL_SIZE},gpu_memory_utilization=${GPU_MEM_UTIL},max_model_len=${MAX_MODEL_LEN}" \
-      --tasks PvExtraction_full \
-      --num_fewshot 0 \
-      --batch_size auto \
-      --output_path "${FINBEN_OUT}" \
-      --log_samples \
-      --apply_chat_template \
-      --include_path "${FINBEN_TASKS_PATH}"
-  else
-    echo "WARNING: FINBEN_TASKS_PATH not found, skipping lm_eval:"
-    echo "  ${FINBEN_TASKS_PATH}"
-  fi
+  python evaluate_pv.py \
+    --model "${MERGED_DIR}" \
+    --out_dir "${EVAL_DIR}" \
+    --tp "${TENSOR_PARALLEL_SIZE}" \
+    --max_model_len "${MAX_MODEL_LEN}" \
+    --gpu_memory_utilization "${GPU_MEM_UTIL}"
 
   echo "✔ DONE: ${MODEL_TAG}"
 done

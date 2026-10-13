@@ -17,6 +17,7 @@ Key fixes vs your pasted version:
 
 import os
 import re
+import inspect
 import json
 import argparse
 from dataclasses import dataclass
@@ -28,6 +29,12 @@ import torch.nn.functional as F
 from datasets import load_from_disk
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
 from peft import LoraConfig, get_peft_model, TaskType
+
+from pv_model_compat import (
+    load_decoder_lm,
+    dtype_kwargs,
+    resolve_lora_targets,
+)
 
 
 # ----------------------------
@@ -650,6 +657,12 @@ def main():
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--system_prompt", type=str, default="You are a helpful assistant.")
+    parser.add_argument(
+        "--lora_target_modules", type=str, default=None,
+        help="Comma-separated module names, or 'auto' to adapt every "
+             "language-tower Linear. Required for the Qwen3.5 family, whose "
+             "linear-attention layers do not use q_proj/k_proj/v_proj/o_proj. "
+             "Default keeps the legacy list.")
     args = parser.parse_args()
 
     cfg = Config(
@@ -695,12 +708,12 @@ def main():
     print("\nLoading model...")
     # IMPORTANT: device_map="auto" is okay, but then we must not manually .to(model.device) in compute_loss.
     device_map = "auto" if args.num_gpus > 1 else {"": 0}
-    model = AutoModelForCausalLM.from_pretrained(
+    model = load_decoder_lm(
         model_path,
-        torch_dtype=torch.bfloat16,
         device_map=device_map,
         use_cache=False,
         token=hf_token,
+        **dtype_kwargs(torch.bfloat16),
     )
     model.gradient_checkpointing_enable()
     model.enable_input_require_grads()
@@ -711,7 +724,8 @@ def main():
         r=cfg.lora_r,
         lora_alpha=cfg.lora_alpha,
         lora_dropout=cfg.lora_dropout,
-        target_modules=list(cfg.lora_target_modules),
+        target_modules=resolve_lora_targets(
+            args.lora_target_modules, model, cfg.lora_target_modules),
         bias="none",
         task_type=TaskType.CAUSAL_LM,
     )
@@ -745,7 +759,11 @@ def main():
         per_device_train_batch_size=cfg.per_device_train_batch_size,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
         learning_rate=cfg.learning_rate,
-        warmup_ratio=cfg.warmup_ratio,
+        # transformers 5 dropped `warmup_ratio`; a float < 1 in `warmup_steps`
+        # is read as the same ratio of total steps.
+        **({"warmup_ratio": cfg.warmup_ratio}
+           if "warmup_ratio" in inspect.signature(TrainingArguments.__init__).parameters
+           else {"warmup_steps": cfg.warmup_ratio}),
         max_grad_norm=cfg.max_grad_norm,
         bf16=True,
         logging_steps=cfg.logging_steps,
@@ -769,7 +787,10 @@ def main():
         train_dataset=train_ds,
         eval_dataset=valid_ds,
         data_collator=collator,
-        tokenizer=tok,
+        # transformers 5 removed `tokenizer=` (renamed `processing_class=` in 4.46).
+        **({"processing_class": tok}
+           if "processing_class" in inspect.signature(Trainer.__init__).parameters
+           else {"tokenizer": tok}),
         cfg=cfg,
     )
 
