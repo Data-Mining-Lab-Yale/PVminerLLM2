@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite this software release."
+type: software
+title: "PVminerLLM2: Improving Structured Extraction of Patient Voice via Preference Optimization"
+version: "1.0.0"
+license: MIT
+repository-code: "https://github.com/Data-Mining-Lab-Yale/PVminerLLM2"
+authors:
+  - family-names: Fodeh
+    given-names: Samah Jamal
+    affiliation: "Yale School of Medicine, Department of Emergency Medicine; Yale School of Medicine, Department of Biomedical Informatics & Data Science"
+  - family-names: Ma
+    given-names: Linhai
+    affiliation: "Yale School of Medicine, Department of Emergency Medicine"
+  - family-names: Puthiaraju
+    given-names: Ganesh
+    affiliation: "Yale School of Medicine, Department of Emergency Medicine"
+  - family-names: Talakokkul
+    given-names: Srivani
+    affiliation: "Yale School of Medicine, Department of Emergency Medicine"
+  - given-names: "Afshan Khan"
+    affiliation: "Yale School of Medicine, Department of Emergency Medicine"
+  - family-names: Irankhah
+    given-names: Elyas
+    affiliation: "Yale School of Medicine, Department of Emergency Medicine"
+  - family-names: Ramachandran
+    given-names: Sreeraj
+    affiliation: "Yale School of Medicine, Department of Emergency Medicine"
+  - family-names: Hagaman
+    given-names: Ashley
+    affiliation: "Yale School of Public Health, Department of Social and Behavioral Sciences"
+  - family-names: Lowe
+    given-names: Sarah
+    affiliation: "Yale School of Public Health, Department of Social and Behavioral Sciences"
+  - family-names: Roundtree
+    given-names: Aimee
+    affiliation: "Texas State University, Division of Research"
