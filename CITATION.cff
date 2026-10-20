@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use this software, please cite this software release."
 type: software
 title: "PVminerLLM2: Improving Structured Extraction of Patient Voice via Preference Optimization"
-version: "1.0.0"
+version: "1.0.1"
 license: MIT
 repository-code: "https://github.com/Data-Mining-Lab-Yale/PVminerLLM2"
 authors:
